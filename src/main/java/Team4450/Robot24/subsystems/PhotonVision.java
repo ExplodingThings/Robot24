@@ -48,7 +48,8 @@ public class PhotonVision extends SubsystemBase
 
     private Transform3d robotToCam;
 
-    public PhotonVision(String cameraName) {
+    public PhotonVision(String cameraName)
+    {
         this(cameraName, new Transform3d());
     }
 	public PhotonVision(String cameraName, Transform3d robotToCam)
@@ -102,18 +103,16 @@ public class PhotonVision extends SubsystemBase
      */
     public PhotonTrackedTarget getTarget(int id)
     {
-        if (hasTargets()) {
+        if (hasTargets() && isFiducialIDValid(id)) {
             List<PhotonTrackedTarget> targets = latestResult.getTargets();
 
             for (int i = 0; i < targets.size(); i++) {
                 PhotonTrackedTarget target = targets.get(i);
                 if (target.getFiducialId() == id) return target;
             }
-
-            return null;
         }
-        else
-            return null;
+        
+        return null;
     }
     
     /**
@@ -121,13 +120,14 @@ public class PhotonVision extends SubsystemBase
      * 
      * @return an ArrayList of the tracked IDs
      */
-    public ArrayList<Integer> getTrackedIDs() {
+    public ArrayList<Integer> getTrackedIDs()
+    {
         ArrayList<Integer> ids = new ArrayList<Integer>();
 
         if (hasTargets()) {
             List<PhotonTrackedTarget> targets = latestResult.getTargets();
 
-            for (int i=0;i<targets.size();i++) {
+            for (int i = 0; i < targets.size(); i++) {
                 ids.add(targets.get(i).getFiducialId());
             }
         }
@@ -162,7 +162,8 @@ public class PhotonVision extends SubsystemBase
      * @param id the Fiducial ID
      * @return whether the camera sees the ID
      */
-    public boolean hasTarget(int id) {
+    public boolean hasTarget(int id)
+    {
         return getTrackedIDs().contains(id);
     }
 
@@ -176,10 +177,64 @@ public class PhotonVision extends SubsystemBase
      */
     public double getYaw()
     {
-        if (hasTargets()) 
-            return latestResult.getBestTarget().getYaw();
-        else
-            return 0;
+        return getYaw(latestResult.getBestTarget().getFiducialId());
+    }
+    /**
+     * Returns the yaw angle of the fiducialID target if seen. 
+     * Must call hasTargets() before calling this function.
+     * @param fiducialID
+     * @return yaw of best target (tag) with fiducialID if valid and seen,
+     * yaw of best target (other) if invalid and seen, otherwise 0.
+     */
+    public double getYaw(int fiducialID)
+    {
+        boolean validFiducialID = isFiducialIDValid(fiducialID);
+
+        if (validFiducialID && hasTarget(fiducialID))
+        {
+            PhotonTrackedTarget target = getTarget(fiducialID);
+            if (target != null) return target.getYaw();
+        }
+        else if (!validFiducialID && hasTargets())
+        {
+            PhotonTrackedTarget target = getBestTarget(false).orElse(null);
+            if (target != null) return target.getYaw();
+        }
+        
+        return 0;
+    }
+
+    /**
+     * Returns the area of the best target in the latest camera results
+     * list. Must call hasTargets() before calling this function.
+     * @return Best target area value. If no target exists, 0.
+     */
+    public double getArea()
+    {
+        return getArea(latestResult.getBestTarget().getFiducialId());
+    }
+    /**
+     * 
+     * @param fiducialID
+     * @return area of best target (tag) with fiducialID if valid and seen,
+     * area of best target (other) if invalid and seen, otherwise 0.
+     */
+    public double getArea(int fiducialID)
+    {
+        boolean validFiducialID = isFiducialIDValid(fiducialID);
+
+        if (validFiducialID && hasTarget(fiducialID))
+        {
+            PhotonTrackedTarget target = getTarget(fiducialID);
+            if (target != null) return target.getArea();
+        }
+        else if (!validFiducialID && hasTargets())
+        {
+            PhotonTrackedTarget target = getBestTarget(false).orElse(null);
+            if (target != null) return target.getArea();
+        }
+        
+        return 0;
     }
 
     /**
@@ -220,19 +275,6 @@ public class PhotonVision extends SubsystemBase
     public boolean isFiducialIDValid(int id)
     {
         return id >= 0 && id <= 16;
-    }
-
-    /**
-     * Returns the area of the best target in the latest camera results
-     * list. Must call hasTargets() before calling this function.
-     * @return Best target area value.
-     */
-    public double getArea()
-    {
-        if (hasTargets()) 
-            return latestResult.getBestTarget().getArea();
-        else
-            return 0;
     }
  
     // Utility Methods =============================================================
@@ -295,7 +337,7 @@ public class PhotonVision extends SubsystemBase
     }
         
     @Override
-	public void initSendable( SendableBuilder builder )
+	public void initSendable(SendableBuilder builder)
 	{
         //super.initSendable(builder);
         builder.setSmartDashboardType("Subsystem");
@@ -312,9 +354,10 @@ public class PhotonVision extends SubsystemBase
      * 
      * @return the Optional estimated pose (empty optional means no pose or uncertain/bad pose)
      */
-    public Optional<EstimatedRobotPose> getEstimatedPose() {
+    public Optional<EstimatedRobotPose> getEstimatedPose()
+    {
         Optional<EstimatedRobotPose> estimatedPoseOptional = poseEstimator.update();
-
+        
         if (estimatedPoseOptional.isPresent()) {
             EstimatedRobotPose estimatedPose = estimatedPoseOptional.get();
             Pose3d pose = estimatedPose.estimatedPose;
@@ -325,14 +368,9 @@ public class PhotonVision extends SubsystemBase
             // update the field2d object in NetworkTables to visualize where the camera thinks it's at
             field.setRobotPose(pose2d);
 
-            // logic for checking if pose is valid would go here:
-            // for example:
-            for (int i = 0; i < estimatedPose.targetsUsed.size(); i++) {
-                // if a target was used with ID > 16 then return no estimated pose
-                if (estimatedPose.targetsUsed.get(i).getFiducialId() > 16) {
+            for (int i = 0; i < estimatedPose.targetsUsed.size(); i++)
+                if (isFiducialIDValid(estimatedPose.targetsUsed.get(i).getFiducialId()))
                     return Optional.empty();
-                }
-            }
 
             return Optional.of(estimatedPose);
         } else return Optional.empty();
@@ -384,7 +422,6 @@ public class PhotonVision extends SubsystemBase
         return Optional.of(target.getBestCameraToTarget().plus(robotToCam.inverse()));
     }
     /// THESE MAY BE USELESS IF robotToTarget() (getBestCameraToTarget) works as I hope it does
-    /// ^ reason for no documentation.
     public Optional<Transform3d> getRobotToTag()
     {
         Optional<EstimatedRobotPose> optionalWorldPose = getEstimatedPose();
@@ -441,5 +478,12 @@ public class PhotonVision extends SubsystemBase
         }
         else
             return Optional.empty();
+    }
+    
+    public Optional<Pose3d> getReferencePose()
+    {
+        Pose3d referencePose = poseEstimator.getReferencePose();
+
+        return referencePose != null ? Optional.of(referencePose) : Optional.empty();
     }
 }
