@@ -134,6 +134,26 @@ public class PhotonVision extends SubsystemBase
 
         return ids;
     }
+    /**
+     * Get an array of the currently tracked valid Fiducial IDs
+     * @return whatever getTrackedIDs returns removing all invalid IDs
+     */
+    public ArrayList<Integer> getTrackedValidIDs()
+    {
+        ArrayList<Integer> ids = getTrackedIDs();
+        ids.removeIf(id -> !isFiducialIDValid(id));
+        return ids;
+    }
+    /**
+     * Get an array of the currently tracked invalid Fiducial IDs
+     * @return whatever getTrackedIDs returns removing all valid IDs
+     */
+    public ArrayList<Integer> getTrackedInvalidIDs()
+    {
+        ArrayList<Integer> ids = getTrackedIDs();
+        ids.removeIf(id -> isFiducialIDValid(id));
+        return ids;
+    }
 
     /**
      * Checks whether or not the camera currently sees a target
@@ -163,6 +183,24 @@ public class PhotonVision extends SubsystemBase
     }
 
     /**
+     * Get best target that either has or does not have an ID
+     * @param hasID
+     * @return optional of best valid target if hasID is true, otherwise best
+     * invalid target. If none qualify, return Optional.empty()
+     */
+    public Optional<PhotonTrackedTarget> getBestTarget(boolean hasID)
+    {
+        if (hasTargets())
+            for (int bestTargetIndex = 0; bestTargetIndex < latestResult.getTargets().size(); bestTargetIndex++) {
+                int targetID = latestResult.getTargets().get(bestTargetIndex).getFiducialId();
+                if (isFiducialIDValid(targetID) == hasID)
+                    return Optional.of(latestResult.getTargets().get(bestTargetIndex));
+            }
+
+        return Optional.empty();
+    }
+
+    /**
      * Returns the Fiducial ID of the current best target, you should call
      * hasTargets() first!
      * @return the ID or -1 if no targets
@@ -173,6 +211,15 @@ public class PhotonVision extends SubsystemBase
             return latestResult.getBestTarget().getFiducialId();
         else
             return -1;
+    }
+    /**
+     * Checks whether the id is within the valid range
+     * @param id the id you are testing
+     * @return whether or not the id is within the valid range
+     */
+    public boolean isFiducialIDValid(int id)
+    {
+        return id >= 0 && id <= 16;
     }
 
     /**
@@ -289,5 +336,110 @@ public class PhotonVision extends SubsystemBase
 
             return Optional.of(estimatedPose);
         } else return Optional.empty();
+    }
+    /**
+     * returns the pose of the best target with a valid ID
+     * @return optional of pose of best target with valid ID
+     */
+    public Optional<Pose3d> getTagPose()
+    {
+        return poseEstimator.getFieldTags().getTagPose(getBestTarget(true).get().getFiducialId());
+    }
+    /**
+     * returns the pose of the best target with an invalid ID
+     * @return optional of pose of best target with invalid ID, or
+     * if a pose is empty Optional.empty()
+     */
+    public Optional<Pose3d> getNotePose()
+    {
+        Optional<EstimatedRobotPose> optionalRobotWorldPose = getEstimatedPose();
+        Optional<Transform3d> optionalNotePose = getRobotToNote();
+        if (optionalRobotWorldPose.isEmpty() || optionalNotePose.isEmpty()) return Optional.empty();
+
+        Pose3d robotWorldPose = optionalRobotWorldPose.get().estimatedPose;
+        Transform3d robotToNote = optionalNotePose.get();
+        
+        Pose3d notePose = robotWorldPose.plus(robotToNote);
+        return Optional.of(notePose);
+    }
+
+    /**
+     * returns robot to best target
+     * @return optional transform of robot to best target 
+     */
+    public Optional<Transform3d> getRobotToTarget()
+    {
+        if (hasTargets())
+            return getRobotToTarget(latestResult.getBestTarget());
+        else
+            return Optional.empty();
+    }
+    /**
+     * returns robot to target {@code target}
+     * @param target
+     * @return optional transform of robot to {@code target}
+     */
+    public Optional<Transform3d> getRobotToTarget(PhotonTrackedTarget target)
+    {
+        return Optional.of(target.getBestCameraToTarget().plus(robotToCam.inverse()));
+    }
+    /// THESE MAY BE USELESS IF robotToTarget() (getBestCameraToTarget) works as I hope it does
+    /// ^ reason for no documentation.
+    public Optional<Transform3d> getRobotToTag()
+    {
+        Optional<EstimatedRobotPose> optionalWorldPose = getEstimatedPose();
+        Optional<Pose3d> optionalTagPose = getTagPose();
+        if (optionalWorldPose.isEmpty() || optionalTagPose.isEmpty()) return Optional.empty();
+
+        Pose3d worldPose = optionalWorldPose.get().estimatedPose;
+        Pose3d tagPose = optionalTagPose.get();
+
+        Transform3d tagRelevantTransform = worldPose.minus(tagPose);
+        return Optional.of(tagRelevantTransform);
+    }
+    public Optional<Transform3d> getRobotToNote()
+    {
+        if (hasTargets()) {
+            EstimatedRobotPose robotWorldPose = getEstimatedPose().orElse(null);
+            if (robotWorldPose == null) return Optional.empty();
+
+            double bestTargetArea = getArea();
+            // Unsure if objects size may get distorted when not looking directly at them, assuming they do not
+            // and only distory base on size. If it ends up being true, will adjust once known how.
+            double yaw = getYaw();
+
+            final double WIDTH_OF_NOTE_MM = 14 * 25.4; // inch to millimeter
+            final double CAM_FOCAL_LENGTH_MM = 50 * 10; // centimeter to millimeter
+            final int CAM_TOTAL_PIXELS = 320 * 240;
+            double pixelsTakenByNote = bestTargetArea * CAM_TOTAL_PIXELS;
+            double robotToNoteMagnitude = (WIDTH_OF_NOTE_MM * CAM_FOCAL_LENGTH_MM) / pixelsTakenByNote;
+
+            // gets a slight translation behind the robot (assuming .div works as I hope)
+            Transform3d baseTransform = new Transform3d(robotWorldPose.estimatedPose, 
+                                                        robotWorldPose.estimatedPose.div(-0.1));
+
+            double baseTransformMagnitude = Math.sqrt(Math.pow(baseTransform.getX(), 2)
+                                             + Math.pow(baseTransform.getY(), 2));
+            double magnitudeMultiplier = 1 / baseTransformMagnitude * robotToNoteMagnitude;
+            
+            double cosRadians = Math.cos(yaw);
+            double sinRadians = Math.sin(yaw);
+            double adjustedX = baseTransform.getX() * cosRadians
+                             - baseTransform.getY() * sinRadians
+                             * magnitudeMultiplier;
+            double adjustedY = baseTransform.getX() * sinRadians
+                             + baseTransform.getY() * cosRadians
+                             * magnitudeMultiplier;
+            Transform3d robotToNoteTransform = new Transform3d(adjustedX,
+                                                               adjustedY,
+                                                               0,
+                                                               new Rotation3d(0,
+                                                                              0,
+                                                                              yaw));
+
+            return Optional.of(robotToNoteTransform);
+        }
+        else
+            return Optional.empty();
     }
 }
