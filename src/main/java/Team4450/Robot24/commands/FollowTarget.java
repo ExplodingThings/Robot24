@@ -5,6 +5,7 @@ import Team4450.Robot24.subsystems.DriveBase;
 import Team4450.Robot24.subsystems.PhotonVision;
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.geometry.Transform3d;
+import edu.wpi.first.util.sendable.SendableRegistry;
 import edu.wpi.first.wpilibj2.command.Command;
 
 public class FollowTarget extends Command {
@@ -13,12 +14,22 @@ public class FollowTarget extends Command {
     DriveBase robotDrive;
     PhotonVision photonVision;
 
-    TargetTypes targetType;
     double maxSpeed;
     float distanceFromTarget;
-    boolean faceTarget;
+
+    TargetTypes targetType;
+    FollowTypes followType;
     
     public enum TargetTypes { AprilTag, Note }
+    public enum FollowTypes { LookAt, DriveTo, LookAndDrive }
+    public boolean looksAtTarget()
+    {
+        return followType != FollowTypes.DriveTo;
+    }
+    public boolean drivesToTarget()
+    {
+        return followType != FollowTypes.LookAt;
+    }
 
     /**
      * Drive to a target using functionality based on targetType
@@ -30,26 +41,25 @@ public class FollowTarget extends Command {
      */
     public FollowTarget(DriveBase robotDrive,
                         PhotonVision photonVision,
-                        TargetTypes targetType,
                         float maxSpeed,
                         float distanceFromTarget,
-                        boolean faceTarget) {
+                        TargetTypes targetType,
+                        FollowTypes followType) {
         this.robotDrive = robotDrive;
         this.photonVision = photonVision;
-        this.targetType = targetType;
         this.maxSpeed = maxSpeed;
         this.distanceFromTarget = distanceFromTarget;
-        this.faceTarget = faceTarget;
+        this.targetType = targetType;
+        this.followType = followType;
 
-        addRequirements(robotDrive);
+        if (drivesToTarget())
+            addRequirements(robotDrive);
     }
 
 
     @Override
     public void initialize() {
         Util.consoleLog();
-
-        // photonVision.selectPipeline(0); // TODO: set pipeline
 
         rotationController.setSetpoint(0); // target should be at yaw=0 degrees
         rotationController.setTolerance(0.5); // within 0.5 degrees of 0
@@ -59,16 +69,32 @@ public class FollowTarget extends Command {
 
     @Override
     public void execute() {
-        switch (targetType) {
-            case AprilTag:
-                moveToAprilTag();
-                break;
-            case Note:
-                moveToNote();
-                break;
-        }
+        Transform3d robotToPose = photonVision.getRobotToBestTarget().orElse(null);
+        if (robotToPose == null) return;
+
+        double robotToPoseMagnitude = Math.sqrt(Math.pow(robotToPose.getX(), 2)
+                                             + Math.pow(robotToPose.getY(), 2));
+        
+        double speedMultiplier = translationController.calculate(1 / robotToPoseMagnitude * maxSpeed);
+        double rot = looksAtTarget() ? rotationController.calculate(photonVision.getYaw()) : 0;
+
+        if (drivesToTarget())
+            robotDrive.driveRobotRelative(robotToPose.getX() * speedMultiplier,
+                                          robotToPose.getY() * speedMultiplier,
+                                          rot);
+        // switch (targetType) {
+        //     case AprilTag:
+        //         followAprilTag();
+        //         break;
+        //     case Note:
+        //         followNote();
+        //         break;
+        // }
     }
-    private void moveToAprilTag() {
+    /**
+     * @deprecated
+     */
+    private void followAprilTag() {
         Transform3d robotToPose = photonVision.getRobotToTag().orElse(null);
         if (robotToPose == null) return;
 
@@ -76,13 +102,17 @@ public class FollowTarget extends Command {
                                              + Math.pow(robotToPose.getY(), 2));
         
         double speedMultiplier = translationController.calculate(1 / robotToPoseMagnitude * maxSpeed);
-        double rot = faceTarget ? rotationController.calculate(photonVision.getYaw()) : 0;
+        double rot = looksAtTarget() ? rotationController.calculate(photonVision.getYaw()) : 0;
 
-        robotDrive.driveRobotRelative(robotToPose.getX() * speedMultiplier,
-                                      robotToPose.getY() * speedMultiplier,
-                                      rot);
+        if (drivesToTarget())
+            robotDrive.driveRobotRelative(robotToPose.getX() * speedMultiplier,
+                                          robotToPose.getY() * speedMultiplier,
+                                          rot);
     }
-    private void moveToNote() {
+    /**
+     * @deprecated
+     */
+    private void followNote() {
         // make sure target centered before we move
         if (!rotationController.atSetpoint()) {
             double rotation = rotationController.calculate(photonVision.getYaw());
@@ -90,7 +120,7 @@ public class FollowTarget extends Command {
         }
         // otherwise drive to the target (only forwards backwards)
         else {
-            double movement = translationController.calculate(photonVision.getArea());
+            double movement = translationController.calculate(photonVision.getPitch());
             robotDrive.driveRobotRelative(0, -movement, 0); // negative because camera backwards
         }
     }

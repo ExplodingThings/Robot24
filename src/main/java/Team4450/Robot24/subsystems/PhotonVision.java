@@ -56,6 +56,10 @@ public class PhotonVision extends SubsystemBase
 
     private Transform3d             robotToCam;
     private PipelineType            pipelineType;
+    private boolean defaultHasID()
+    {
+        return pipelineType == PipelineType.APRILTAG_TRACKING;
+    }
 
     public static enum PipelineType {APRILTAG_TRACKING, OBJECT_TRACKING};
 
@@ -66,7 +70,6 @@ public class PhotonVision extends SubsystemBase
     public PhotonVision(String cameraName, PipelineType pipelineType) {
         this(cameraName, pipelineType, new Transform3d());
     }
-
     /**
      * Create an instance of PhotonVision class for a camera.
      * @param cameraName The name of the camera.
@@ -155,7 +158,6 @@ public class PhotonVision extends SubsystemBase
         
         visionSim.addVisionTargets("note"+Integer.toString(id), target);
     }
-
 
     @Override
     public void simulationPeriodic() {
@@ -317,19 +319,15 @@ public class PhotonVision extends SubsystemBase
     public double getYaw(int fiducialID)
     {
         boolean validFiducialID = isFiducialIDValid(fiducialID);
+        PhotonTrackedTarget target;
 
         if (validFiducialID && hasTarget(fiducialID))
-        {
-            PhotonTrackedTarget target = getTarget(fiducialID);
-            if (target != null) return target.getYaw();
-        }
+            target = getTarget(fiducialID);
         else if (!validFiducialID && hasTargets())
-        {
-            PhotonTrackedTarget target = getBestTarget(false).orElse(null);
-            if (target != null) return target.getYaw();
-        }
+            target = getBestTarget(false).orElse(null);
+        else target = null;
         
-        return 0;
+        return target != null ? target.getYaw() : 0;
     }
 
     /**
@@ -352,21 +350,58 @@ public class PhotonVision extends SubsystemBase
     public double getArea(int fiducialID)
     {
         boolean validFiducialID = isFiducialIDValid(fiducialID);
+        PhotonTrackedTarget target;
 
         if (validFiducialID && hasTarget(fiducialID))
-        {
-            PhotonTrackedTarget target = getTarget(fiducialID);
-            if (target != null) return target.getArea();
-        }
+            target = getTarget(fiducialID);
         else if (!validFiducialID && hasTargets())
-        {
-            PhotonTrackedTarget target = getBestTarget(false).orElse(null);
-            if (target != null) return target.getArea();
-        }
+            target = getBestTarget(false).orElse(null);
+        else target = null;
         
-        return 0;
+        return target != null ? target.getArea() : 0;
+    }
+    /**
+     * Returns the pitch angle of the best target in the latest camera results
+     * list. Must call hasTargets() before calling this function.
+     * @return Best target pitch value from straight ahead or zero. -pitch means
+     * target is below camera center. (degrees)
+     */
+    public double getPitch()
+    {
+        PhotonTrackedTarget bestTarget = latestResult.getBestTarget();
+        return bestTarget == null ? 0 : getPitch(bestTarget.getFiducialId());
+    }
+    /**
+     * Returns the pitch angle of the fiducialID target if seen.
+     * Must call hasTargets() before calling this function.
+     * @param fiducialID
+     * @return pitch angle of best target (tag) with fiducialID if valid and seen,
+     * pitch angle of best target (other) if invalid and seen, otherwise 0.
+     */
+    public double getPitch(int fiducialID)
+    {
+        boolean validFiducialID = isFiducialIDValid(fiducialID);
+        PhotonTrackedTarget target;
+
+        if (validFiducialID && hasTarget(fiducialID))
+            target = getTarget(fiducialID);
+        else if (!validFiducialID && hasTargets())
+            target = getBestTarget(false).orElse(null);
+        else target = null; 
+        
+        return target != null ? target.getPitch() : 0;
     }
 
+    /**
+     * Get best target that either has or does not have an ID, depending on pipelineType
+     * @param hasID
+     * @return optional of best valid target if tracking april tags, otherwise best
+     * invalid target if tracking notes. If none qualify, return Optional.empty()
+     */
+    public Optional<PhotonTrackedTarget> getBestTarget()
+    {
+        return getBestTarget(defaultHasID());
+    }
     /**
      * Get best target that either has or does not have an ID
      * @param hasID
@@ -386,20 +421,6 @@ public class PhotonVision extends SubsystemBase
         }
 
         return Optional.empty();
-    }
-
-    /**
-     * Returns the pitch angle of the best target in the latest camera results
-     * list. Must call hasTargets() before calling this function.
-     * @return Best target pitch value from straight ahead or zero. -pitch means
-     * target is below camera center. (degrees)
-     */
-    public double getPitch()
-    {
-        if (hasTargets()) 
-            return latestResult.getBestTarget().getPitch();
-        else
-            return 0;
     }
 
     /**
@@ -535,11 +556,21 @@ public class PhotonVision extends SubsystemBase
             return Optional.of(estimatedPose);
         } else return Optional.empty();
     }
+    
+    /**
+     * returns the pose of the best target with valid or invalid ID
+     * @return optional of pose of the best target with valid or invalid ID depending on
+     * {@code defaultHasID()} 
+     */
+    public Optional<Pose3d> getBestTargetPose()
+    {
+        return defaultHasID() ? getBestTagPose() : getBestNotePose();
+    }
     /**
      * returns the pose of the best target with a valid ID
      * @return optional of pose of best target with valid ID, empty if none exists
      */
-    public Optional<Pose3d> getTagPose()
+    public Optional<Pose3d> getBestTagPose()
     {
         PhotonTrackedTarget target = getBestTarget(true).orElse(null);
         return target == null ? Optional.empty() : poseEstimator.getFieldTags().getTagPose(target.getFiducialId());
@@ -548,7 +579,7 @@ public class PhotonVision extends SubsystemBase
      * returns the pose of the best target with an invalid ID
      * @return optional of pose of best target with invalid ID, empty if none exists
      */
-    public Optional<Pose3d> getNotePose()
+    public Optional<Pose3d> getBestNotePose()
     {
         Optional<EstimatedRobotPose> optionalRobotWorldPose = getEstimatedPose();
         Optional<Transform3d> optionalNotePose = getRobotToNote();
@@ -567,21 +598,17 @@ public class PhotonVision extends SubsystemBase
      */
     public Optional<Transform3d> getRobotToBestTarget()
     {
-        getLatestResult();
-        PhotonTrackedTarget target = latestResult.getBestTarget();
-        return target == null ? Optional.empty() : getRobotToTarget(target);
+        return getRobotToBestTarget(defaultHasID());
     }
     /**
      * returns robot to best valid or invalid target
      * @return optional of Transform3d of robot to best target, valid target if {@code hasID}
      * is true, false if not
      */
-    public Optional<Transform3d> getRobotToTarget(boolean hasID)
+    public Optional<Transform3d> getRobotToBestTarget(boolean hasID)
     {
         PhotonTrackedTarget bestTarget = getBestTarget(hasID).orElse(null);
-        if (bestTarget != null) getRobotToTarget(bestTarget);
-        
-        return Optional.empty();
+        return bestTarget == null ? Optional.empty() : getRobotToTarget(bestTarget);
     }
     /**
      * returns robot to target {@code target}
@@ -596,7 +623,7 @@ public class PhotonVision extends SubsystemBase
     public Optional<Transform3d> getRobotToTag()
     {
         Optional<EstimatedRobotPose> optionalWorldPose = getEstimatedPose();
-        Optional<Pose3d> optionalTagPose = getTagPose();
+        Optional<Pose3d> optionalTagPose = getBestTagPose();
         if (optionalWorldPose.isEmpty() || optionalTagPose.isEmpty()) return Optional.empty();
 
         Pose3d worldPose = optionalWorldPose.get().estimatedPose;
