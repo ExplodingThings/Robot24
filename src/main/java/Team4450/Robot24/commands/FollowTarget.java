@@ -78,7 +78,6 @@ public class FollowTarget extends Command {
         double robotToPoseMagnitude = Math.sqrt(Math.pow(robotToPose.getX(), 2)
                                              + Math.pow(robotToPose.getY(), 2));
         
-        // multiplier to normalize robotToPose
         double normalizeMultiplier = 1 / robotToPoseMagnitude;
         double distanceMultiplier = robotToPoseMagnitude <= distanceFromTarget + slowdownDistance ?
                                     (robotToPoseMagnitude - distanceFromTarget) / slowdownDistance :
