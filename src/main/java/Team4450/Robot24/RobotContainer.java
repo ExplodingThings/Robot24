@@ -21,6 +21,7 @@ import Team4450.Robot24.subsystems.DriveBase;
 import Team4450.Robot24.subsystems.PhotonVision;
 import Team4450.Robot24.subsystems.Intake;
 import Team4450.Robot24.subsystems.ShuffleBoard;
+import Team4450.Robot24.subsystems.PhotonVision.PipelineType;
 import Team4450.Lib.MonitorPDP;
 import Team4450.Lib.NavX;
 import Team4450.Lib.Util;
@@ -30,6 +31,8 @@ import edu.wpi.first.wpilibj.DriverStation.Alliance;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.math.MathUtil;
+import edu.wpi.first.math.geometry.Rotation3d;
+import edu.wpi.first.math.geometry.Transform3d;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.InstantCommand;
 import edu.wpi.first.wpilibj2.command.RunCommand;
@@ -48,8 +51,9 @@ public class RobotContainer
 
 	public static ShuffleBoard	shuffleBoard;
 	public static DriveBase 	driveBase;
-	public static PhotonVision	photonVision;
-	//public static LimeLight		limeLight;
+	public static PhotonVision	pvPoseCamera;
+	public static PhotonVision	pvBackCamera;
+	public static PhotonVision	pvFrontCamera;
 	private final Intake       	intake;
 	
 	// Subsystem Default Commands.
@@ -163,18 +167,20 @@ public class RobotContainer
 
 		shuffleBoard = new ShuffleBoard();
 		driveBase = new DriveBase();
-		photonVision = new PhotonVision("4450-LL");
+		pvPoseCamera = new PhotonVision(CAMERA_POSE_ESTIMATOR, PipelineType.APRILTAG_TRACKING, CAMERA_POSE_TRANSFORM);
+		pvBackCamera = new PhotonVision(CAMERA_BACK, PipelineType.APRILTAG_TRACKING, CAMERA_BACK_TRANSFORM);
+		pvFrontCamera = new PhotonVision(CAMERA_FRONT, PipelineType.OBJECT_TRACKING, CAMERA_FRONT_TRANSFORM);
 		intake = new Intake();
-		//limeLight = new LimeLight();
 
 		// Create any persistent commands.
 
 		// Set any subsystem Default commands.
 
 		// This sets up the photonVision subsystem to constantly update the robotDrive odometry
-	    // with AprilTags (if it sees them).
-
-    	photonVision.setDefaultCommand(new UpdateVisionPose(photonVision, driveBase));
+	    // with AprilTags (if it sees them). (As well as vision simulator)
+    	pvPoseCamera.setDefaultCommand(new UpdateVisionPose(pvPoseCamera, driveBase));
+		pvFrontCamera.setDefaultCommand(new UpdateVisionPose(pvFrontCamera, driveBase));
+		pvBackCamera.setDefaultCommand(new UpdateVisionPose(pvBackCamera, driveBase));
 
 		// Set the default drive command. This command will be scheduled automatically to run
 		// every teleop period and so use the gamepad joy sticks to drive the robot. 
@@ -296,7 +302,7 @@ public class RobotContainer
 
 		// the "A" button (or cross on PS4 controller) toggles tracking mode.
 		new Trigger(() -> driverController.getAButton())
-			.toggleOnTrue(new FaceAprilTag(photonVision, driveBase));
+			.toggleOnTrue(new FaceAprilTag(driveBase, pvPoseCamera));
 
 		// POV buttons do same as alternate driving mode but without any lateral
 		// movement and increments of 45deg.
@@ -317,7 +323,7 @@ public class RobotContainer
 
 		// toggle Note tracking.
 	    new Trigger(() -> driverController.getBButton())
-    	    .toggleOnTrue(new DriveToNote(driveBase, photonVision));
+    	    .toggleOnTrue(new DriveToNote(driveBase, pvFrontCamera));
 
 		// Advance DS tab display.
 		//new Trigger(() -> driverPad.getPOVAngle(90))
