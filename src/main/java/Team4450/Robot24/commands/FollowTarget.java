@@ -16,6 +16,7 @@ public class FollowTarget extends Command {
 
     double maxSpeed;
     float distanceFromTarget;
+    float slowdownDistance;
 
     TargetTypes targetType;
     FollowTypes followType;
@@ -43,12 +44,14 @@ public class FollowTarget extends Command {
                         PhotonVision photonVision,
                         float maxSpeed,
                         float distanceFromTarget,
+                        float slowdownDistance,
                         TargetTypes targetType,
                         FollowTypes followType) {
         this.robotDrive = robotDrive;
         this.photonVision = photonVision;
         this.maxSpeed = maxSpeed;
         this.distanceFromTarget = distanceFromTarget;
+        this.slowdownDistance = slowdownDistance;
         this.targetType = targetType;
         this.followType = followType;
 
@@ -75,7 +78,12 @@ public class FollowTarget extends Command {
         double robotToPoseMagnitude = Math.sqrt(Math.pow(robotToPose.getX(), 2)
                                              + Math.pow(robotToPose.getY(), 2));
         
-        double speedMultiplier = translationController.calculate(1 / robotToPoseMagnitude * maxSpeed);
+        // multiplier to normalize robotToPose
+        double normalizeMultiplier = 1 / robotToPoseMagnitude;
+        double distanceMultiplier = robotToPoseMagnitude <= distanceFromTarget + slowdownDistance ?
+                                    (robotToPoseMagnitude - distanceFromTarget) / slowdownDistance :
+                                    1;
+        double speedMultiplier = normalizeMultiplier * distanceMultiplier;
         double rot = looksAtTarget() ? rotationController.calculate(photonVision.getYaw()) : 0;
 
         if (drivesToTarget())
